@@ -8,7 +8,7 @@ vars = {
   'nan_version':
     '675cefebca42410733da8a454c8d9391fcebfbc2',
   'squirrel.mac_version':
-    '8d808803bc89ec0e2aa1450474856dfee3b00c6b',
+    '47d44ac102ff8fe7b4fd494592a961485360e890',
   'reactiveobjc_version':
     '74ab5baccc6f7202c8ac69a8d1e152c29dc1ea76',
   'mantle_version':

@@ -325,10 +325,10 @@ index 0000000000000000000000000000000000000000..a7aeeb7d3e187bd91ef12ed860d1e37e
 +    sys.exit(e.returncode)
 diff --git a/filenames.gni b/filenames.gni
 new file mode 100644
-index 0000000000000000000000000000000000000000..cee305c80588ffe2234bfadd5c211a9c301fe589
+index 0000000000000000000000000000000000000000..950a2af133640fbe68bb3c88849722a18cbf20a4
 --- /dev/null
 +++ b/filenames.gni
-@@ -0,0 +1,249 @@
+@@ -0,0 +1,252 @@
 +squirrel_filenames = {
 +  headers = [
 +    "Squirrel/NSBundle+SQRLVersionExtensions.h",
@@ -339,6 +339,7 @@ index 0000000000000000000000000000000000000000..cee305c80588ffe2234bfadd5c211a9c
 +    "Squirrel/SQRLCodeSignature.h",
 +    "Squirrel/SQRLDirectoryManager.h",
 +    "Squirrel/SQRLDownloadedUpdate.h",
++    "Squirrel/SQRLDownloader.h",
 +    "Squirrel/SQRLShipItLauncher.h",
 +    "Squirrel/SQRLShipItRequest.h",
 +    "Squirrel/SQRLUpdate.h",
@@ -357,6 +358,8 @@ index 0000000000000000000000000000000000000000..cee305c80588ffe2234bfadd5c211a9c
 +    "Squirrel/SQRLDirectoryManager.m",
 +    "Squirrel/SQRLDownloadedUpdate.h",
 +    "Squirrel/SQRLDownloadedUpdate.m",
++    "Squirrel/SQRLDownloader.h",
++    "Squirrel/SQRLDownloader.m",
 +    "Squirrel/SQRLShipItLauncher.h",
 +    "Squirrel/SQRLShipItLauncher.m",
 +    "Squirrel/SQRLShipItRequest.h",
