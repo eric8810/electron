@@ -166,6 +166,10 @@ class OffScreenRenderWidgetHostView
   viz::SurfaceId GetCurrentSurfaceId() const override;
   std::unique_ptr<content::SyntheticGestureTarget>
   CreateSyntheticGestureTarget() override;
+  void GestureEventAck(
+      const blink::WebGestureEvent& event,
+      blink::mojom::InputEventResultSource ack_source,
+      blink::mojom::InputEventResultState ack_result) override;
   void ImeCompositionRangeChanged(
       const gfx::Range&,
       const std::optional<std::vector<gfx::Rect>>& character_bounds) override {}
