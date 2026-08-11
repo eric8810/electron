@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Shelley Vohr <shelley.vohr@gmail.com>
-Date: Thu, 6 Aug 2026 18:24:32 +0000
+Date: Tue, 11 Aug 2026 19:17:26 +0000
 Subject: editing: don't recalc style from LayoutSelection::Commit()
 
 LayoutSelection::Commit() runs from the compositing-inputs lifecycle
@@ -23,18 +23,36 @@ schedule another frame so the next compositing-inputs step commits it
 against clean style; the forced update inside SelectionHasFocus() is
 then a guaranteed no-op on this path, and the clean path is unchanged.
 
+Downstream only: when Commit() defers, the first occurrence in each
+renderer records which dirtiness survived to compositing-inputs time
+(crash keys LayoutSelection-dirty / LayoutSelection-lifecycle) and
+uploads a DumpWithoutCrashing report, to identify the underlying
+invalidation for the upstream review.
+
 Backport of https://chromium-review.googlesource.com/c/chromium/src/+/8187581.
 
 Bug: 541952000
 Test: LayoutSelectionTest.CommitWithDirtyStyleRetriesNextFrame
 
-(cherry picked from commit 3efe38516862c58899724803cde99db413589462)
-
 diff --git a/third_party/blink/renderer/core/editing/layout_selection.cc b/third_party/blink/renderer/core/editing/layout_selection.cc
-index 2ba06840c9ff94577a7dd6b90977809b8f83ce56..2e597ff938ee66bd107219279aa5810133905abf 100644
+index 2ba06840c9ff94577a7dd6b90977809b8f83ce56..c66acc904a313c3524efee92d23ee6dbffb5db77 100644
 --- a/third_party/blink/renderer/core/editing/layout_selection.cc
 +++ b/third_party/blink/renderer/core/editing/layout_selection.cc
-@@ -29,6 +29,7 @@
+@@ -21,7 +21,13 @@
+ 
+ #include "third_party/blink/renderer/core/editing/layout_selection.h"
+ 
++#include <string>
++
++#include "base/debug/crash_logging.h"
++#include "base/debug/dump_without_crashing.h"
++#include "third_party/blink/renderer/core/animation/document_animations.h"
+ #include "third_party/blink/renderer/core/css/style_change_reason.h"
++#include "third_party/blink/renderer/core/css/style_engine.h"
+ #include "third_party/blink/renderer/core/dom/document.h"
+ #include "third_party/blink/renderer/core/editing/editing_utilities.h"
+ #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
+@@ -29,6 +35,7 @@
  #include "third_party/blink/renderer/core/editing/selection_template.h"
  #include "third_party/blink/renderer/core/editing/visible_position.h"
  #include "third_party/blink/renderer/core/editing/visible_units.h"
@@ -42,7 +60,47 @@ index 2ba06840c9ff94577a7dd6b90977809b8f83ce56..2e597ff938ee66bd107219279aa58101
  #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
  #include "third_party/blink/renderer/core/html/html_wbr_element.h"
  #include "third_party/blink/renderer/core/layout/block_node.h"
-@@ -951,11 +952,21 @@ void LayoutSelection::SetHasPendingSelection() {
+@@ -948,14 +955,62 @@ void LayoutSelection::SetHasPendingSelection() {
+   has_pending_selection_ = true;
+ }
+ 
++namespace {
++
++// Uploads one report per process naming what left the layout tree dirty at
++// compositing-inputs time, so the deferral below can be traced to its cause.
++void ReportDirtyTreeAtCommit(Document& document) {
++  static bool reported = false;
++  if (reported) {
++    return;
++  }
++  reported = true;
++  StyleEngine& engine = document.GetStyleEngine();
++  std::string bits;
++  auto add = [&bits](bool set, const char* name) {
++    if (set) {
++      bits += name;
++      bits += ',';
++    }
++  };
++  add(engine.NeedsFullStyleUpdate(), "full");
++  add(engine.NeedsActiveStyleUpdate(), "active");
++  add(engine.NeedsStyleRecalc(), "recalc");
++  add(engine.NeedsStyleInvalidation(), "invalidation");
++  add(document.ChildNeedsStyleRecalc(), "child-recalc");
++  add(document.NeedsStyleInvalidation(), "doc-invalidation");
++  add(document.IsSlotAssignmentDirty(), "slots");
++  add(document.GetDocumentAnimations().NeedsAnimationTimingUpdate(),
++      "anim-timing");
++  add(document.View() && document.View()->NeedsLayout(), "layout");
++  add(document.LocalOwner(), "subframe");
++  SCOPED_CRASH_KEY_STRING64("LayoutSelection", "dirty", bits);
++  SCOPED_CRASH_KEY_NUMBER("LayoutSelection", "lifecycle",
++                          static_cast<int>(document.Lifecycle().GetState()));
++  base::debug::DumpWithoutCrashing();
++}
++
++}  // namespace
++
  void LayoutSelection::Commit() {
    if (!has_pending_selection_)
      return;
@@ -55,6 +113,7 @@ index 2ba06840c9ff94577a7dd6b90977809b8f83ce56..2e597ff938ee66bd107219279aa58101
 +  // animation timing update became due), so commit on the next frame instead.
 +  Document& document = frame_selection_->GetDocument();
 +  if (document.NeedsLayoutTreeUpdate()) {
++    ReportDirtyTreeAtCommit(document);
 +    document.View()->ScheduleAnimation();
 +    return;
 +  }
