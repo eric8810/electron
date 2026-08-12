@@ -8,6 +8,11 @@ on:
         type: string
         default: release
         required: false
+      target:
+        description: Single target used by standard-resume; release requires all
+        type: string
+        default: all
+        required: false
   workflow_dispatch:
     inputs:
       runner_profile:
@@ -16,7 +21,19 @@ on:
         options:
           - release
           - standard-probe
+          - standard-resume
         default: release
+        required: true
+      target:
+        description: Single target used by standard-resume; release requires all
+        type: choice
+        options:
+          - all
+          - darwin-arm64
+          - darwin-x64
+          - win32-x64
+          - linux-x64
+        default: all
         required: true
   push:
     tags:
@@ -45,6 +62,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     env:
       RUNNER_PROFILE: ${{ github.event_name == 'push' && 'release' || inputs.runner_profile }}
+      TARGET: ${{ github.event_name == 'push' && 'all' || inputs.target }}
       RUNNER_DARWIN_ARM64: ${{ vars.DIMCODE_ELECTRON_RUNNER_DARWIN_ARM64 }}
       RUNNER_DARWIN_X64: ${{ vars.DIMCODE_ELECTRON_RUNNER_DARWIN_X64 }}
       RUNNER_WIN32_X64: ${{ vars.DIMCODE_ELECTRON_RUNNER_WIN32_X64 }}
@@ -63,7 +81,31 @@ jobs:
                 {runner:"ubuntu-24.04",platform:"linux",manifest_platform:"linux",arch:"x64"}
               ]}')"
               ;;
+            standard-resume)
+              case "${TARGET}" in
+                darwin-arm64)
+                  matrix='{"include":[{"runner":"macos-15","platform":"darwin","manifest_platform":"mac","arch":"arm64","prime_minutes":205}]}'
+                  ;;
+                darwin-x64)
+                  matrix='{"include":[{"runner":"macos-15-intel","platform":"darwin","manifest_platform":"mac","arch":"x64","prime_minutes":250}]}'
+                  ;;
+                win32-x64)
+                  matrix='{"include":[{"runner":"windows-2022","platform":"win32","manifest_platform":"win","arch":"x64","prime_minutes":155}]}'
+                  ;;
+                linux-x64)
+                  matrix='{"include":[{"runner":"ubuntu-24.04","platform":"linux","manifest_platform":"linux","arch":"x64","prime_minutes":225}]}'
+                  ;;
+                *)
+                  echo "standard-resume requires one supported target, got: ${TARGET}" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
             release)
+              if [[ "${TARGET}" != all ]]; then
+                echo "release profile requires target=all, got: ${TARGET}" >&2
+                exit 1
+              fi
               missing=()
               [[ -n "${RUNNER_DARWIN_ARM64}" ]] || missing+=(DIMCODE_ELECTRON_RUNNER_DARWIN_ARM64)
               [[ -n "${RUNNER_DARWIN_X64}" ]] || missing+=(DIMCODE_ELECTRON_RUNNER_DARWIN_X64)
@@ -92,14 +134,19 @@ jobs:
           esac
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
 
-  build:
-    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+  prime:
+    name: Prime cache ${{ matrix.platform }} ${{ matrix.arch }}
+    if: github.event_name != 'push' && inputs.runner_profile == 'standard-resume'
     needs: configure
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+    env:
+      GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"'
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
 
     steps:
       - name: Check out patched Electron
@@ -145,6 +192,117 @@ jobs:
         shell: bash
         run: npm install --global @electron/build-tools
 
+      - name: Install pinned sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Initialize release cache primer
+        shell: bash
+        run: |
+          e init dimcode-prime-${{ matrix.platform }}-${{ matrix.arch }} \
+            --root="${GITHUB_WORKSPACE}/electron-root" \
+            --import=release \
+            --out=Release \
+            --target-cpu="${{ matrix.arch }}" \
+            --remote-build=none \
+            --use-https \
+            --fork="${GITHUB_REPOSITORY}" \
+            --force
+          e sync --no-history
+          test "$(git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" rev-parse HEAD)" = "${GITHUB_SHA}"
+          git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" pack-refs --all
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo "${GITHUB_WORKSPACE}/electron-root/src/build/install-build-deps.sh" --no-prompt
+
+      - name: Prime release compiler cache
+        id: compile
+        continue-on-error: true
+        timeout-minutes: ${{ matrix.prime_minutes }}
+        shell: bash
+        run: e build --target electron:electron_dist_zip --no-remote
+
+      - name: Require populated compiler cache
+        if: always()
+        shell: bash
+        run: |
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "${stats}"
+          hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' <<< "${stats}")"
+          misses="$(awk '$1 == "Cache" && $2 == "misses" { print $3; exit }' <<< "${stats}")"
+          [[ "${hits}" =~ ^[0-9]+$ ]]
+          [[ "${misses}" =~ ^[0-9]+$ ]]
+          (( hits + misses >= 100 ))
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    if: always() && needs.configure.result == 'success' && (needs.prime.result == 'success' || needs.prime.result == 'skipped')
+    needs:
+      - configure
+      - prime
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+    env:
+      GN_EXTRA_ARGS: ${{ inputs.runner_profile == 'standard-resume' && 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"' || 'symbol_level=0 override_electron_version="41.7.1"' }}
+      SCCACHE_GHA_ENABLED: ${{ inputs.runner_profile == 'standard-resume' && 'on' || 'off' }}
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+
+    steps:
+      - name: Check out patched Electron
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+          path: electron-root/src/electron
+
+      - name: Assert fork ownership
+        shell: bash
+        run: test "${GITHUB_REPOSITORY}" = "eric8810/electron"
+
+      - name: Free macOS disk space
+        if: runner.os == 'macOS'
+        uses: ./electron-root/src/electron/.github/actions/free-space-macos
+
+      - name: Free Linux disk space
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Configure build-tools Git settings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+          git config --global core.fscache true
+          git config --global core.longpaths true
+          git config --global core.preloadindex true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: 22.21.1
+
+      - name: Install pinned Electron build tools
+        shell: bash
+        run: npm install --global @electron/build-tools
+
+      - name: Install pinned sccache
+        if: inputs.runner_profile == 'standard-resume'
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
       - name: Initialize release build
         shell: bash
         run: |
@@ -171,6 +329,16 @@ jobs:
         run: |
           e build --target electron:electron_dist_zip --no-remote
           e build --target electron:node_headers --no-remote
+
+      - name: Require resumed compiler cache hits
+        if: inputs.runner_profile == 'standard-resume'
+        shell: bash
+        run: |
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "${stats}"
+          hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' <<< "${stats}")"
+          [[ "${hits}" =~ ^[0-9]+$ ]]
+          (( hits >= 100 ))
 
       - name: Prepare Windows Node import library
         if: runner.os == 'Windows'
@@ -232,6 +400,7 @@ jobs:
 
   assemble:
     name: Assemble prebuilt bundle
+    if: inputs.runner_profile != 'standard-resume'
     needs: build
     runs-on: ubuntu-24.04
     permissions:
