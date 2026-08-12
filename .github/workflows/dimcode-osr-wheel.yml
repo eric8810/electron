@@ -187,10 +187,10 @@ jobs:
           printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc"
           sccache --zero-stats
           sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-smoke.o"
-          stats="$(sccache --show-stats)"
-          printf '%s\n' "${stats}"
-          [[ "${stats}" =~ Cache[[:space:]]hits[[:space:]]+0 ]]
-          [[ "${stats}" =~ Cache[[:space:]]misses[[:space:]]+1 ]]
+          stats="$(sccache --show-stats --stats-format json)"
+          jq . <<< "${stats}"
+          test "$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")" = 0
+          test "$(jq '[.stats.cache_misses.counts[]] | add // 0' <<< "${stats}")" = 1
 
       - name: Exercise resumable timeout boundary
         id: timeout
@@ -239,7 +239,7 @@ jobs:
           printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc"
           sccache --zero-stats
           sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-smoke.o"
-          stats="$(sccache --show-stats)"
-          printf '%s\n' "${stats}"
-          [[ "${stats}" =~ Cache[[:space:]]hits[[:space:]]+1 ]]
-          [[ "${stats}" =~ Cache[[:space:]]misses[[:space:]]+0 ]]
+          stats="$(sccache --show-stats --stats-format json)"
+          jq . <<< "${stats}"
+          test "$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")" = 1
+          test "$(jq '[.stats.cache_misses.counts[]] | add // 0' <<< "${stats}")" = 0

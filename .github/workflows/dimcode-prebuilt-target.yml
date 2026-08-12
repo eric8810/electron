@@ -153,13 +153,13 @@ jobs:
         if: always()
         shell: bash
         run: |
-          stats="$(sccache --show-stats)"
-          printf '%s\n' "${stats}"
-          hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' <<< "${stats}")"
-          misses="$(awk '$1 == "Cache" && $2 == "misses" { print $3; exit }' <<< "${stats}")"
-          [[ "${hits}" =~ ^[0-9]+$ ]]
-          [[ "${misses}" =~ ^[0-9]+$ ]]
+          stats="$(sccache --show-stats --stats-format json)"
+          jq . <<< "${stats}"
+          hits="$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")"
+          misses="$(jq '[.stats.cache_misses.counts[]] | add // 0' <<< "${stats}")"
+          errors="$(jq '([.stats.cache_errors.counts[]] | add // 0) + .stats.cache_timeouts + .stats.cache_read_errors + .stats.cache_write_errors' <<< "${stats}")"
           (( hits + misses >= 100 ))
+          (( errors == 0 ))
 
   build:
     name: Build and validate
@@ -263,11 +263,12 @@ jobs:
         if: inputs.resume
         shell: bash
         run: |
-          stats="$(sccache --show-stats)"
-          printf '%s\n' "${stats}"
-          hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' <<< "${stats}")"
-          [[ "${hits}" =~ ^[0-9]+$ ]]
+          stats="$(sccache --show-stats --stats-format json)"
+          jq . <<< "${stats}"
+          hits="$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")"
+          errors="$(jq '([.stats.cache_errors.counts[]] | add // 0) + .stats.cache_timeouts + .stats.cache_read_errors + .stats.cache_write_errors' <<< "${stats}")"
           (( hits >= 100 ))
+          (( errors == 0 ))
 
       - name: Prepare Windows Node import library
         if: runner.os == 'Windows'
