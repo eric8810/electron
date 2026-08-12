@@ -58,7 +58,7 @@ jobs:
           - 1
           - 2
     env:
-      GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"'
+      GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
       SCCACHE_GHA_ENABLED: 'on'
       SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.cache_epoch }}
 
@@ -121,6 +121,15 @@ jobs:
         with:
           version: v0.16.0
 
+      - name: Configure absolute sccache wrapper
+        shell: bash
+        run: |
+          sccache_command="$(command -v sccache)"
+          if [[ "${RUNNER_OS}" == Windows ]]; then
+            sccache_command="$(cygpath -m "${sccache_command}")"
+          fi
+          printf 'GN_EXTRA_ARGS=%s cc_wrapper="%s"\n' "${GN_EXTRA_ARGS}" "${sccache_command}" >> "${GITHUB_ENV}"
+
       - name: Initialize release cache primer
         shell: bash
         run: |
@@ -168,7 +177,7 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
     env:
-      GN_EXTRA_ARGS: ${{ inputs.resume && 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"' || 'symbol_level=0 override_electron_version="41.7.1"' }}
+      GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
       SCCACHE_GHA_ENABLED: ${{ inputs.resume && 'on' || 'off' }}
       SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.cache_epoch }}
 
@@ -231,6 +240,16 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
         with:
           version: v0.16.0
+
+      - name: Configure absolute sccache wrapper
+        if: inputs.resume
+        shell: bash
+        run: |
+          sccache_command="$(command -v sccache)"
+          if [[ "${RUNNER_OS}" == Windows ]]; then
+            sccache_command="$(cygpath -m "${sccache_command}")"
+          fi
+          printf 'GN_EXTRA_ARGS=%s cc_wrapper="%s"\n' "${GN_EXTRA_ARGS}" "${sccache_command}" >> "${GITHUB_ENV}"
 
       - name: Initialize release build
         shell: bash

@@ -227,12 +227,23 @@ jobs:
         with:
           version: v0.16.0
 
+      - name: Configure absolute Windows sccache wrapper
+        shell: bash
+        run: |
+          sccache_command="$(cygpath -m "$(command -v sccache)")"
+          compiler_command="$(cygpath -m "$(command -v clang++)")"
+          printf 'DIMCODE_SCCACHE_COMMAND=%s\n' "${sccache_command}" >> "${GITHUB_ENV}"
+          printf 'DIMCODE_CXX_COMMAND=%s\n' "${compiler_command}" >> "${GITHUB_ENV}"
+
       - name: Prime Windows compiler cache
         shell: bash
         run: |
-          printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc"
+          cd "$(cygpath -u "${RUNNER_TEMP}")"
+          printf '%s\n' 'int main() { return 0; }' > dimcode-sccache-windows-smoke.cc
+          printf 'rule cxx\n  command = "%s" "%s" -c $in -o $out\nbuild dimcode-sccache-windows-smoke.obj: cxx dimcode-sccache-windows-smoke.cc\n' \
+            "${DIMCODE_SCCACHE_COMMAND}" "${DIMCODE_CXX_COMMAND}" > dimcode-sccache-windows-smoke.ninja
           sccache --zero-stats
-          sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-windows-smoke.obj"
+          ninja -f dimcode-sccache-windows-smoke.ninja
           stats="$(sccache --show-stats --stats-format json)"
           jq . <<< "${stats}"
           test "$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")" = 0
@@ -253,12 +264,23 @@ jobs:
         with:
           version: v0.16.0
 
+      - name: Configure absolute Windows sccache wrapper
+        shell: bash
+        run: |
+          sccache_command="$(cygpath -m "$(command -v sccache)")"
+          compiler_command="$(cygpath -m "$(command -v clang++)")"
+          printf 'DIMCODE_SCCACHE_COMMAND=%s\n' "${sccache_command}" >> "${GITHUB_ENV}"
+          printf 'DIMCODE_CXX_COMMAND=%s\n' "${compiler_command}" >> "${GITHUB_ENV}"
+
       - name: Require a cross-job Windows compiler cache hit
         shell: bash
         run: |
-          printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc"
+          cd "$(cygpath -u "${RUNNER_TEMP}")"
+          printf '%s\n' 'int main() { return 0; }' > dimcode-sccache-windows-smoke.cc
+          printf 'rule cxx\n  command = "%s" "%s" -c $in -o $out\nbuild dimcode-sccache-windows-smoke.obj: cxx dimcode-sccache-windows-smoke.cc\n' \
+            "${DIMCODE_SCCACHE_COMMAND}" "${DIMCODE_CXX_COMMAND}" > dimcode-sccache-windows-smoke.ninja
           sccache --zero-stats
-          sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-windows-smoke.obj"
+          ninja -f dimcode-sccache-windows-smoke.ninja
           stats="$(sccache --show-stats --stats-format json)"
           jq . <<< "${stats}"
           test "$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")" = 1
