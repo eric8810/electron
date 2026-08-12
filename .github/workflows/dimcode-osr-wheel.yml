@@ -2,6 +2,15 @@ name: DimCode OSR wheel
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Workflow mode
+        type: choice
+        options:
+          - regression
+          - prebuilt
+        default: regression
+        required: true
   push:
     branches:
       - dimcode/osr-wheel-phase
@@ -24,6 +33,7 @@ env:
 
 jobs:
   build-and-test:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'regression'
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
@@ -125,3 +135,9 @@ jobs:
           else
             npm run test -- -g='retargets a wheel gesture after an unconsumed direction change'
           fi
+
+  prebuilt:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'prebuilt'
+    uses: ./.github/workflows/dimcode-prebuilt-release.yml
+    permissions:
+      contents: read
