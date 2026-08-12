@@ -9,6 +9,7 @@ on:
         options:
           - regression
           - prebuilt
+          - cache-smoke
         default: regression
         required: true
       runner_profile:
@@ -148,3 +149,52 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+
+  sccache-prime:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'cache-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: dimcode-electron-cache-smoke-${{ github.run_id }}
+    steps:
+      - name: Install pinned sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Prime GitHub Actions compiler cache
+        shell: bash
+        run: |
+          printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc"
+          sccache --zero-stats
+          sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-smoke.o"
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "${stats}"
+          [[ "${stats}" =~ Cache[[:space:]]hits[[:space:]]+0 ]]
+          [[ "${stats}" =~ Cache[[:space:]]misses[[:space:]]+1 ]]
+
+  sccache-hit:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'cache-smoke'
+    needs: sccache-prime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: dimcode-electron-cache-smoke-${{ github.run_id }}
+    steps:
+      - name: Install pinned sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Require a cross-job compiler cache hit
+        shell: bash
+        run: |
+          printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc"
+          sccache --zero-stats
+          sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-smoke.o"
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "${stats}"
+          [[ "${stats}" =~ Cache[[:space:]]hits[[:space:]]+1 ]]
+          [[ "${stats}" =~ Cache[[:space:]]misses[[:space:]]+0 ]]
