@@ -209,6 +209,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'cache-smoke'
     runs-on: windows-2022
     timeout-minutes: 5
+    env:
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: dimcode-electron-windows-cache-smoke-${{ github.run_id }}
     steps:
       - name: Check out toolchain assertion
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
@@ -218,6 +221,49 @@ jobs:
       - name: Assert Windows VS 2022 toolchain
         shell: pwsh
         run: '& "${env:GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/assert-windows-toolchain.ps1"'
+
+      - name: Install pinned sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Prime Windows compiler cache
+        shell: bash
+        run: |
+          printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc"
+          sccache --zero-stats
+          sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-windows-smoke.obj"
+          stats="$(sccache --show-stats --stats-format json)"
+          jq . <<< "${stats}"
+          test "$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")" = 0
+          test "$(jq '[.stats.cache_misses.counts[]] | add // 0' <<< "${stats}")" = 1
+          test "$(jq '([.stats.cache_errors.counts[]] | add // 0) + .stats.cache_timeouts + .stats.cache_read_errors + .stats.cache_write_errors' <<< "${stats}")" = 0
+
+  windows-cache-hit:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'cache-smoke'
+    needs: windows-toolchain
+    runs-on: windows-2022
+    timeout-minutes: 5
+    env:
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: dimcode-electron-windows-cache-smoke-${{ github.run_id }}
+    steps:
+      - name: Install pinned sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Require a cross-job Windows compiler cache hit
+        shell: bash
+        run: |
+          printf '%s\n' 'int main() { return 0; }' > "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc"
+          sccache --zero-stats
+          sccache clang++ -c "${GITHUB_WORKSPACE}/dimcode-sccache-windows-smoke.cc" -o "${RUNNER_TEMP}/dimcode-sccache-windows-smoke.obj"
+          stats="$(sccache --show-stats --stats-format json)"
+          jq . <<< "${stats}"
+          test "$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")" = 1
+          test "$(jq '[.stats.cache_misses.counts[]] | add // 0' <<< "${stats}")" = 0
+          test "$(jq '([.stats.cache_errors.counts[]] | add // 0) + .stats.cache_timeouts + .stats.cache_read_errors + .stats.cache_write_errors' <<< "${stats}")" = 0
 
   sccache-hit:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'cache-smoke'
