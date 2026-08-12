@@ -52,7 +52,6 @@ env:
   EVM_CONFIG: ${{ github.workspace }}/.electron-build-tools-config
   EVM_CURRENT_FILE: ${{ github.workspace }}/.electron-build-tools-current
   GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
-  SCCACHE_SOURCE_EPOCH: 8d918e182302681bf1e00d8f4b4c694467a89cf8
 
 jobs:
   configure:
@@ -155,7 +154,7 @@ jobs:
     env:
       GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"'
       SCCACHE_GHA_ENABLED: 'on'
-      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.SCCACHE_SOURCE_EPOCH }}
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-8d918e182302681bf1e00d8f4b4c694467a89cf8
 
     steps:
       - name: Check out patched Electron
@@ -260,7 +259,7 @@ jobs:
     env:
       GN_EXTRA_ARGS: ${{ inputs.runner_profile == 'standard-resume' && 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"' || 'symbol_level=0 override_electron_version="41.7.1"' }}
       SCCACHE_GHA_ENABLED: ${{ inputs.runner_profile == 'standard-resume' && 'on' || 'off' }}
-      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.SCCACHE_SOURCE_EPOCH }}
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-8d918e182302681bf1e00d8f4b4c694467a89cf8
 
     steps:
       - name: Check out patched Electron
