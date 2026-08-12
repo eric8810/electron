@@ -417,10 +417,12 @@ jobs:
           esac
           test "$("${runtime}" --version)" = "v41.7.1"
           runtime_file="$(file "${runtime}")"
-          case "${{ matrix.arch }}" in
-            arm64) [[ "${runtime_file}" == *arm64* ]] ;;
-            x64) [[ "${runtime_file}" == *x86_64* || "${runtime_file}" == *x86-64* || "${runtime_file}" == *PE32+* ]] ;;
-            *) echo "unsupported architecture: ${{ matrix.arch }}" >&2; exit 1 ;;
+          case "${{ matrix.platform }}-${{ matrix.arch }}" in
+            darwin-arm64) [[ "${runtime_file}" == *Mach-O* && "${runtime_file}" == *arm64* ]] ;;
+            darwin-x64) [[ "${runtime_file}" == *Mach-O* && "${runtime_file}" == *x86_64* ]] ;;
+            linux-x64) [[ "${runtime_file}" == *ELF\ 64-bit* && "${runtime_file}" == *x86-64* ]] ;;
+            win32-x64) [[ "${runtime_file}" == *PE32+* && "${runtime_file}" == *x86-64* ]] ;;
+            *) echo "unsupported runtime target: ${{ matrix.platform }}-${{ matrix.arch }}" >&2; exit 1 ;;
           esac
 
       - name: Run OSR wheel regression spec
