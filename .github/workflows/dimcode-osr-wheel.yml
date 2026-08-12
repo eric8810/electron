@@ -18,7 +18,7 @@ on:
   pull_request:
 
 concurrency:
-  group: dimcode-osr-wheel-${{ github.workflow }}-${{ github.ref }}
+  group: dimcode-osr-wheel-${{ github.workflow }}-${{ github.ref }}-${{ inputs.mode || 'regression' }}
   cancel-in-progress: true
 
 permissions:
