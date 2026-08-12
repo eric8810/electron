@@ -1,0 +1,123 @@
+name: DimCode OSR wheel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dimcode/osr-wheel-phase
+      - dimcode/osr-wheel-ci
+  pull_request:
+
+concurrency:
+  group: dimcode-osr-wheel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TOOLS_SHA: 3f2c00792ab46cf9b9ab492a3f0a67c8f5d303be
+  ELECTRON_OUT_DIR: Testing
+  EVM_CONFIG: ${{ github.workspace }}/.electron-build-tools-config
+  EVM_CURRENT_FILE: ${{ github.workspace }}/.electron-build-tools-current
+  GN_EXTRA_ARGS: symbol_level=0
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            runner: macos-15
+            target-cpu: arm64
+          - name: Linux x64
+            runner: ubuntu-24.04
+            target-cpu: x64
+          - name: Windows x64
+            runner: windows-2025
+            target-cpu: x64
+
+    steps:
+      - name: Check out patched Electron
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+          path: electron-root/src/electron
+
+      - name: Free macOS disk space
+        if: runner.os == 'macOS'
+        uses: ./electron-root/src/electron/.github/actions/free-space-macos
+
+      - name: Free Linux disk space
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Configure Windows checkout
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: 22.21.x
+
+      - name: Install pinned Electron build tools
+        shell: bash
+        run: npm install --global @electron/build-tools
+
+      - name: Initialize Electron build
+        shell: bash
+        run: |
+          e init dimcode-ci \
+            --root="${GITHUB_WORKSPACE}/electron-root" \
+            --import=testing \
+            --out=Testing \
+            --target-cpu="${{ matrix.target-cpu }}" \
+            --remote-build=none \
+            --use-https \
+            --fork="${GITHUB_REPOSITORY}" \
+            --force
+          e sync --no-history
+          test "$(git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo "${GITHUB_WORKSPACE}/electron-root/src/build/install-build-deps.sh" --no-prompt
+
+      - name: Build Electron and Node headers
+        shell: bash
+        run: |
+          e build --no-remote
+          e build --target electron:node_headers --no-remote
+
+      - name: Prepare Windows Node import library
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/electron-root/src/out/Testing/gen/node_headers/Release"
+          cp "${GITHUB_WORKSPACE}/electron-root/src/out/Testing/electron.lib" \
+            "${GITHUB_WORKSPACE}/electron-root/src/out/Testing/gen/node_headers/Release/node.lib"
+
+      - name: Run OSR wheel regression spec
+        shell: bash
+        working-directory: electron-root/src/electron
+        run: |
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            xvfb-run -a npm run test -- -g='retargets a wheel gesture after an unconsumed direction change'
+          else
+            npm run test -- -g='retargets a wheel gesture after an unconsumed direction change'
+          fi
