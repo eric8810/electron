@@ -2,7 +2,22 @@ name: DimCode Electron prebuilt
 
 on:
   workflow_call:
+    inputs:
+      runner_profile:
+        description: Runner profile used for the platform build matrix
+        type: string
+        default: release
+        required: false
   workflow_dispatch:
+    inputs:
+      runner_profile:
+        description: Runner profile used for the platform build matrix
+        type: choice
+        options:
+          - release
+          - standard-probe
+        default: release
+        required: true
   push:
     tags:
       - 'dimcode-v41.7.1-r*'
@@ -22,30 +37,69 @@ env:
   GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
 
 jobs:
+  configure:
+    name: Configure prebuilt runners
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    env:
+      RUNNER_PROFILE: ${{ github.event_name == 'push' && 'release' || inputs.runner_profile }}
+      RUNNER_DARWIN_ARM64: ${{ vars.DIMCODE_ELECTRON_RUNNER_DARWIN_ARM64 }}
+      RUNNER_DARWIN_X64: ${{ vars.DIMCODE_ELECTRON_RUNNER_DARWIN_X64 }}
+      RUNNER_WIN32_X64: ${{ vars.DIMCODE_ELECTRON_RUNNER_WIN32_X64 }}
+      RUNNER_LINUX_X64: ${{ vars.DIMCODE_ELECTRON_RUNNER_LINUX_X64 }}
+    steps:
+      - name: Resolve build matrix
+        id: matrix
+        shell: bash
+        run: |
+          case "${RUNNER_PROFILE}" in
+            standard-probe)
+              matrix="$(jq -cn '{include:[
+                {runner:"macos-15",platform:"darwin",manifest_platform:"mac",arch:"arm64"},
+                {runner:"macos-15-intel",platform:"darwin",manifest_platform:"mac",arch:"x64"},
+                {runner:"windows-2022",platform:"win32",manifest_platform:"win",arch:"x64"},
+                {runner:"ubuntu-24.04",platform:"linux",manifest_platform:"linux",arch:"x64"}
+              ]}')"
+              ;;
+            release)
+              missing=()
+              [[ -n "${RUNNER_DARWIN_ARM64}" ]] || missing+=(DIMCODE_ELECTRON_RUNNER_DARWIN_ARM64)
+              [[ -n "${RUNNER_DARWIN_X64}" ]] || missing+=(DIMCODE_ELECTRON_RUNNER_DARWIN_X64)
+              [[ -n "${RUNNER_WIN32_X64}" ]] || missing+=(DIMCODE_ELECTRON_RUNNER_WIN32_X64)
+              [[ -n "${RUNNER_LINUX_X64}" ]] || missing+=(DIMCODE_ELECTRON_RUNNER_LINUX_X64)
+              if (( ${#missing[@]} > 0 )); then
+                printf 'missing required release runner variables: %s\n' "${missing[*]}" >&2
+                exit 1
+              fi
+              matrix="$(jq -cn \
+                --arg darwin_arm64 "${RUNNER_DARWIN_ARM64}" \
+                --arg darwin_x64 "${RUNNER_DARWIN_X64}" \
+                --arg win32_x64 "${RUNNER_WIN32_X64}" \
+                --arg linux_x64 "${RUNNER_LINUX_X64}" \
+                '{include:[
+                  {runner:$darwin_arm64,platform:"darwin",manifest_platform:"mac",arch:"arm64"},
+                  {runner:$darwin_x64,platform:"darwin",manifest_platform:"mac",arch:"x64"},
+                  {runner:$win32_x64,platform:"win32",manifest_platform:"win",arch:"x64"},
+                  {runner:$linux_x64,platform:"linux",manifest_platform:"linux",arch:"x64"}
+                ]}')"
+              ;;
+            *)
+              echo "unsupported runner profile: ${RUNNER_PROFILE}" >&2
+              exit 1
+              ;;
+          esac
+          echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+
   build:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: configure
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            platform: darwin
-            manifest_platform: mac
-            arch: arm64
-          - runner: macos-15-intel
-            platform: darwin
-            manifest_platform: mac
-            arch: x64
-          - runner: windows-2022
-            platform: win32
-            manifest_platform: win
-            arch: x64
-          - runner: ubuntu-24.04
-            platform: linux
-            manifest_platform: linux
-            arch: x64
+      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
 
     steps:
       - name: Check out patched Electron

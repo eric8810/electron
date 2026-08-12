@@ -11,11 +11,14 @@ on:
           - prebuilt
         default: regression
         required: true
-  push:
-    branches:
-      - dimcode/osr-wheel-phase
-      - dimcode/osr-wheel-ci
-  pull_request:
+      runner_profile:
+        description: Prebuilt runner profile; ignored in regression mode
+        type: choice
+        options:
+          - release
+          - standard-probe
+        default: release
+        required: true
 
 concurrency:
   group: dimcode-osr-wheel-${{ github.workflow }}-${{ github.ref }}-${{ inputs.mode || 'regression' }}
@@ -139,6 +142,8 @@ jobs:
   prebuilt:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'prebuilt'
     uses: ./.github/workflows/dimcode-prebuilt-release.yml
+    with:
+      runner_profile: ${{ inputs.runner_profile }}
     permissions:
       contents: write
       id-token: write
