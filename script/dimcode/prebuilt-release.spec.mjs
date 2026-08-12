@@ -28,10 +28,10 @@ const targets = [
   { platform: 'win32', architecture: 'x64' }
 ];
 
-const runHelper = (args) =>
+const runHelper = (args, environment = ciEnvironment) =>
   spawnSync(process.execPath, [helper, ...args], {
     cwd: repository,
-    env: ciEnvironment,
+    env: environment,
     encoding: 'utf8'
   });
 
@@ -105,6 +105,55 @@ test('rejects aggregation when a supported target is missing', () => {
     const result = runHelper(['aggregate', '--input-dir', root, '--output-dir', join(root, 'bundle')]);
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /expected 4 platform manifests, got 0/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('requires the exact custom release tag identity', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-release-tag-'));
+  try {
+    const buildDirectory = join(root, 'build');
+    const outputDirectory = join(root, 'output');
+    mkdirSync(buildDirectory);
+    writeFileSync(join(buildDirectory, 'dist.zip'), 'release fixture\n');
+    writeFileSync(
+      join(buildDirectory, 'args.gn'),
+      [
+        'import("//electron/build/args/release.gn")',
+        'target_cpu = "x64"',
+        'override_electron_version = "41.7.1"',
+        ''
+      ].join('\n')
+    );
+    const arguments_ = [
+      'prepare',
+      '--build-dir',
+      buildDirectory,
+      '--output-dir',
+      outputDirectory,
+      '--platform',
+      'win32',
+      '--arch',
+      'x64'
+    ];
+    const tagEnvironment = {
+      ...ciEnvironment,
+      GITHUB_REF_TYPE: 'tag',
+      GITHUB_REF_NAME: 'dimcode-v41.7.1-r3'
+    };
+    requireSuccess(runHelper(arguments_, tagEnvironment));
+    const manifest = JSON.parse(readFileSync(join(outputDirectory, 'platform-manifest-win32-x64.json'), 'utf8'));
+    assert.equal(manifest.releaseTag, 'dimcode-v41.7.1-r3');
+    assert.equal(manifest.customRevision, 'r3');
+    assert.equal(manifest.asset.filename, 'electron-v41.7.1-dimcode.r3-win32-x64.zip');
+
+    const invalid = runHelper(arguments_, {
+      ...tagEnvironment,
+      GITHUB_REF_NAME: 'dimcode-v41.7.1-r0'
+    });
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /release tag is invalid/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
