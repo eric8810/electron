@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  cpSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
@@ -28,9 +37,9 @@ const targets = [
   { platform: 'win32', architecture: 'x64' }
 ];
 
-const runHelper = (args, environment = ciEnvironment) =>
+const runHelper = (args, environment = ciEnvironment, workingDirectory = repository) =>
   spawnSync(process.execPath, [helper, ...args], {
-    cwd: repository,
+    cwd: workingDirectory,
     env: environment,
     encoding: 'utf8'
   });
@@ -154,6 +163,72 @@ test('requires the exact custom release tag identity', () => {
     });
     assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /release tag is invalid/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects source changes outside the reviewed patch stack', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-source-contract-'));
+  try {
+    const sourceRepository = join(root, 'electron');
+    const buildDirectory = join(root, 'build');
+    execFileSync('git', ['clone', '--quiet', '--shared', repository, sourceRepository]);
+    execFileSync('git', ['config', 'user.email', 'dimcode-ci@example.invalid'], { cwd: sourceRepository });
+    execFileSync('git', ['config', 'user.name', 'DimCode CI'], { cwd: sourceRepository });
+    mkdirSync(buildDirectory);
+    writeFileSync(join(buildDirectory, 'dist.zip'), 'source contract fixture\n');
+    writeFileSync(
+      join(buildDirectory, 'args.gn'),
+      [
+        'import("//electron/build/args/release.gn")',
+        'target_cpu = "x64"',
+        'override_electron_version = "41.7.1"',
+        ''
+      ].join('\n')
+    );
+    const prepareAtHead = (outputName) => {
+      const temporaryHead = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: sourceRepository,
+        encoding: 'utf8'
+      }).trim();
+      return runHelper(
+        [
+          'prepare',
+          '--build-dir',
+          buildDirectory,
+          '--output-dir',
+          join(root, outputName),
+          '--platform',
+          'linux',
+          '--arch',
+          'x64'
+        ],
+        { ...ciEnvironment, GITHUB_SHA: temporaryHead },
+        sourceRepository
+      );
+    };
+
+    const unexpectedPath = join(sourceRepository, 'unexpected-source-change.txt');
+    writeFileSync(unexpectedPath, 'not part of the reviewed release patch\n');
+    execFileSync('git', ['add', 'unexpected-source-change.txt'], { cwd: sourceRepository });
+    execFileSync('git', ['commit', '--quiet', '-m', 'test unexpected source change'], { cwd: sourceRepository });
+    const unexpected = prepareAtHead('unexpected-output');
+    assert.notEqual(unexpected.status, 0);
+    assert.match(unexpected.stderr, /source contains changes outside the release allowlist/);
+
+    unlinkSync(unexpectedPath);
+    execFileSync('git', ['add', '--all'], { cwd: sourceRepository });
+    execFileSync('git', ['commit', '--quiet', '-m', 'test remove unexpected source change'], {
+      cwd: sourceRepository
+    });
+    const nativePath = join(sourceRepository, 'shell/browser/osr/osr_render_widget_host_view.cc');
+    appendFileSync(nativePath, '\n// source contract drift fixture\n');
+    execFileSync('git', ['add', 'shell/browser/osr/osr_render_widget_host_view.cc'], { cwd: sourceRepository });
+    execFileSync('git', ['commit', '--quiet', '-m', 'test native patch drift'], { cwd: sourceRepository });
+    const nativeDrift = prepareAtHead('native-drift-output');
+    assert.notEqual(nativeDrift.status, 0);
+    assert.match(nativeDrift.stderr, /native wheel patch differs from the reviewed patch tip/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

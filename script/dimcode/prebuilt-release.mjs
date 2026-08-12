@@ -16,8 +16,23 @@ import { basename, join, resolve as resolvePath } from 'node:path';
 
 const ELECTRON_VERSION = '41.7.1';
 const BASE_SOURCE_COMMIT = 'fda774933622cbc110f34a43015cc1fe6f4f56b3';
+const PATCH_TIP_COMMIT = '048b3cf5dcf4a5e7f27497f3d6b92224fddf184a';
 const REPOSITORY = 'eric8810/electron';
 const REGRESSION_SPEC = 'retargets a wheel gesture after an unconsumed direction change';
+const NATIVE_PATCH_PATHS = [
+  'shell/browser/osr/osr_render_widget_host_view.cc',
+  'shell/browser/osr/osr_render_widget_host_view.h',
+  'spec/api-browser-window-spec.ts'
+];
+const ALLOWED_SOURCE_CHANGES = new Set([
+  '.github/workflows/dimcode-osr-wheel.yml',
+  '.github/workflows/dimcode-prebuilt-release.yml',
+  '.github/workflows/dimcode-prebuilt-target.yml',
+  'script/dimcode/assert-windows-toolchain.ps1',
+  'script/dimcode/prebuilt-release.mjs',
+  'script/dimcode/prebuilt-release.spec.mjs',
+  ...NATIVE_PATCH_PATHS
+]);
 const SUPPORTED_TARGETS = new Map([
   ['darwin-arm64', { manifestPlatform: 'mac' }],
   ['darwin-x64', { manifestPlatform: 'mac' }],
@@ -151,6 +166,38 @@ const requireCiIdentity = () => {
   };
 };
 
+const validateSourcePatch = (actualHead) => {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', BASE_SOURCE_COMMIT, actualHead]);
+    execFileSync('git', ['merge-base', '--is-ancestor', PATCH_TIP_COMMIT, actualHead]);
+  } catch {
+    fail(`required source history is not an ancestor of ${actualHead}`);
+  }
+  const nativeDrift = execFileSync('git', [
+    'diff',
+    '--name-only',
+    '-z',
+    `${PATCH_TIP_COMMIT}..${actualHead}`,
+    '--',
+    ...NATIVE_PATCH_PATHS
+  ]);
+  if (nativeDrift.length !== 0) {
+    fail('native wheel patch differs from the reviewed patch tip');
+  }
+  const changedPaths = execFileSync('git', ['diff', '--name-only', '-z', `${BASE_SOURCE_COMMIT}..${actualHead}`])
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean);
+  const unexpectedPaths = changedPaths.filter((path) => !ALLOWED_SOURCE_CHANGES.has(path));
+  if (unexpectedPaths.length !== 0) {
+    fail(`source contains changes outside the release allowlist: ${unexpectedPaths.join(', ')}`);
+  }
+  const missingRequiredPaths = [...ALLOWED_SOURCE_CHANGES].filter((path) => !changedPaths.includes(path));
+  if (missingRequiredPaths.length !== 0) {
+    fail(`source is missing required release paths: ${missingRequiredPaths.join(', ')}`);
+  }
+};
+
 const validatePlatformManifest = (manifest, name) => {
   assertExactKeys(
     manifest,
@@ -256,11 +303,7 @@ const prepare = async (options) => {
   if (actualHead !== identity.sourceCommit) {
     fail(`checkout HEAD ${actualHead} does not match GITHUB_SHA ${identity.sourceCommit}`);
   }
-  try {
-    execFileSync('git', ['merge-base', '--is-ancestor', BASE_SOURCE_COMMIT, actualHead]);
-  } catch {
-    fail(`${BASE_SOURCE_COMMIT} is not an ancestor of ${actualHead}`);
-  }
+  validateSourcePatch(actualHead);
 
   const argsPath = join(buildDirectory, 'args.gn');
   const distPath = join(buildDirectory, 'dist.zip');
