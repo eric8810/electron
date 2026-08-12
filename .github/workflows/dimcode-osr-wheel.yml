@@ -67,6 +67,7 @@ jobs:
         shell: bash
         run: |
           git config --global core.autocrlf false
+          git config --global core.filemode false
           git config --global core.longpaths true
 
       - name: Set up Node.js
