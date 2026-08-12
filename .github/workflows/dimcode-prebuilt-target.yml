@@ -1,0 +1,318 @@
+name: DimCode Electron prebuilt target
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Exact runner label for this build
+        type: string
+        required: true
+      platform:
+        description: Node platform identity
+        type: string
+        required: true
+      manifest_platform:
+        description: Electron dist manifest platform identity
+        type: string
+        required: true
+      arch:
+        description: Electron target CPU
+        type: string
+        required: true
+      resume:
+        description: Prime the GitHub Actions compiler cache in two bounded jobs
+        type: boolean
+        default: false
+        required: false
+      prime_minutes:
+        description: Compile minutes for each cache-primer job
+        type: number
+        default: 225
+        required: false
+      cache_epoch:
+        description: Compiler-input epoch; change when native source or GN args change
+        type: string
+        default: phase-ack-v1
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TOOLS_SHA: 3f2c00792ab46cf9b9ab492a3f0a67c8f5d303be
+  ELECTRON_OUT_DIR: Release
+  EVM_CONFIG: ${{ github.workspace }}/.electron-build-tools-config
+  EVM_CURRENT_FILE: ${{ github.workspace }}/.electron-build-tools-current
+
+jobs:
+  prime:
+    name: Prime cache segment ${{ matrix.segment }}
+    if: inputs.resume
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        segment:
+          - 1
+          - 2
+    env:
+      GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"'
+      SCCACHE_GHA_ENABLED: 'on'
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.cache_epoch }}
+
+    steps:
+      - name: Check out patched Electron
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+          path: electron-root/src/electron
+
+      - name: Assert target contract
+        shell: bash
+        run: |
+          test "${GITHUB_REPOSITORY}" = "eric8810/electron"
+          case "${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.manifest_platform }}" in
+            darwin-arm64-mac|darwin-x64-mac|win32-x64-win|linux-x64-linux) ;;
+            *) echo "unsupported prebuilt target" >&2; exit 1 ;;
+          esac
+
+      - name: Free macOS disk space
+        if: runner.os == 'macOS'
+        uses: ./electron-root/src/electron/.github/actions/free-space-macos
+
+      - name: Free Linux disk space
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Configure build-tools Git settings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+          git config --global core.fscache true
+          git config --global core.longpaths true
+          git config --global core.preloadindex true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: 22.21.1
+
+      - name: Install pinned Electron build tools
+        shell: bash
+        run: npm install --global @electron/build-tools
+
+      - name: Install pinned sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Initialize release cache primer
+        shell: bash
+        run: |
+          e init dimcode-prime-${{ inputs.platform }}-${{ inputs.arch }}-${{ matrix.segment }} \
+            --root="${GITHUB_WORKSPACE}/electron-root" \
+            --import=release \
+            --out=Release \
+            --target-cpu="${{ inputs.arch }}" \
+            --remote-build=none \
+            --use-https \
+            --fork="${GITHUB_REPOSITORY}" \
+            --force
+          e sync --no-history
+          test "$(git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" rev-parse HEAD)" = "${GITHUB_SHA}"
+          git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" pack-refs --all
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo "${GITHUB_WORKSPACE}/electron-root/src/build/install-build-deps.sh" --no-prompt
+
+      - name: Prime release compiler cache
+        id: compile
+        continue-on-error: true
+        timeout-minutes: ${{ inputs.prime_minutes }}
+        shell: bash
+        run: e build --target electron:electron_dist_zip --no-remote
+
+      - name: Require populated compiler cache
+        if: always()
+        shell: bash
+        run: |
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "${stats}"
+          hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' <<< "${stats}")"
+          misses="$(awk '$1 == "Cache" && $2 == "misses" { print $3; exit }' <<< "${stats}")"
+          [[ "${hits}" =~ ^[0-9]+$ ]]
+          [[ "${misses}" =~ ^[0-9]+$ ]]
+          (( hits + misses >= 100 ))
+
+  build:
+    name: Build and validate
+    if: always() && (needs.prime.result == 'success' || needs.prime.result == 'skipped')
+    needs: prime
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
+    env:
+      GN_EXTRA_ARGS: ${{ inputs.resume && 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"' || 'symbol_level=0 override_electron_version="41.7.1"' }}
+      SCCACHE_GHA_ENABLED: ${{ inputs.resume && 'on' || 'off' }}
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.cache_epoch }}
+
+    steps:
+      - name: Check out patched Electron
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          fetch-depth: 0
+          path: electron-root/src/electron
+
+      - name: Assert target contract
+        shell: bash
+        run: |
+          test "${GITHUB_REPOSITORY}" = "eric8810/electron"
+          case "${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.manifest_platform }}" in
+            darwin-arm64-mac|darwin-x64-mac|win32-x64-win|linux-x64-linux) ;;
+            *) echo "unsupported prebuilt target" >&2; exit 1 ;;
+          esac
+
+      - name: Free macOS disk space
+        if: runner.os == 'macOS'
+        uses: ./electron-root/src/electron/.github/actions/free-space-macos
+
+      - name: Free Linux disk space
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          df -h
+
+      - name: Configure build-tools Git settings
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+          git config --global core.fscache true
+          git config --global core.longpaths true
+          git config --global core.preloadindex true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
+        with:
+          node-version: 22.21.1
+
+      - name: Install pinned Electron build tools
+        shell: bash
+        run: npm install --global @electron/build-tools
+
+      - name: Install pinned sccache
+        if: inputs.resume
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        with:
+          version: v0.16.0
+
+      - name: Initialize release build
+        shell: bash
+        run: |
+          e init dimcode-prebuilt-${{ inputs.platform }}-${{ inputs.arch }} \
+            --root="${GITHUB_WORKSPACE}/electron-root" \
+            --import=release \
+            --out=Release \
+            --target-cpu="${{ inputs.arch }}" \
+            --remote-build=none \
+            --use-https \
+            --fork="${GITHUB_REPOSITORY}" \
+            --force
+          e sync --no-history
+          test "$(git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" rev-parse HEAD)" = "${GITHUB_SHA}"
+          git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" pack-refs --all
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo "${GITHUB_WORKSPACE}/electron-root/src/build/install-build-deps.sh" --no-prompt
+
+      - name: Build release runtime and Node headers
+        shell: bash
+        run: |
+          e build --target electron:electron_dist_zip --no-remote
+          e build --target electron:node_headers --no-remote
+
+      - name: Require resumed compiler cache hits
+        if: inputs.resume
+        shell: bash
+        run: |
+          stats="$(sccache --show-stats)"
+          printf '%s\n' "${stats}"
+          hits="$(awk '$1 == "Cache" && $2 == "hits" { print $3; exit }' <<< "${stats}")"
+          [[ "${hits}" =~ ^[0-9]+$ ]]
+          (( hits >= 100 ))
+
+      - name: Prepare Windows Node import library
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/electron-root/src/out/Release/gen/node_headers/Release"
+          cp "${GITHUB_WORKSPACE}/electron-root/src/out/Release/electron.lib" \
+            "${GITHUB_WORKSPACE}/electron-root/src/out/Release/gen/node_headers/Release/node.lib"
+
+      - name: Validate release runtime
+        shell: bash
+        run: |
+          build_dir="${GITHUB_WORKSPACE}/electron-root/src/out/Release"
+          python3 "${GITHUB_WORKSPACE}/electron-root/src/electron/script/zip_manifests/check-zip-manifest.py" \
+            "${build_dir}/dist.zip" \
+            "${GITHUB_WORKSPACE}/electron-root/src/electron/script/zip_manifests/dist_zip.${{ inputs.manifest_platform }}.${{ inputs.arch }}.manifest"
+          case "${{ inputs.platform }}" in
+            darwin) runtime="${build_dir}/Electron.app/Contents/MacOS/Electron" ;;
+            linux) runtime="${build_dir}/electron" ;;
+            win32) runtime="${build_dir}/electron.exe" ;;
+            *) echo "unsupported platform: ${{ inputs.platform }}" >&2; exit 1 ;;
+          esac
+          test "$("${runtime}" --version)" = "v41.7.1"
+          runtime_file="$(file "${runtime}")"
+          case "${{ inputs.arch }}" in
+            arm64) [[ "${runtime_file}" == *arm64* ]] ;;
+            x64) [[ "${runtime_file}" == *x86_64* || "${runtime_file}" == *x86-64* || "${runtime_file}" == *PE32+* ]] ;;
+            *) echo "unsupported architecture: ${{ inputs.arch }}" >&2; exit 1 ;;
+          esac
+
+      - name: Run OSR wheel regression spec
+        shell: bash
+        working-directory: electron-root/src/electron
+        run: |
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            xvfb-run -a npm run test -- -g='retargets a wheel gesture after an unconsumed direction change'
+          else
+            npm run test -- -g='retargets a wheel gesture after an unconsumed direction change'
+          fi
+
+      - name: Prepare immutable prebuilt artifact
+        shell: bash
+        working-directory: electron-root/src/electron
+        run: |
+          node script/dimcode/prebuilt-release.mjs prepare \
+            --build-dir "${GITHUB_WORKSPACE}/electron-root/src/out/Release" \
+            --output-dir "${GITHUB_WORKSPACE}/prebuilt-output" \
+            --platform "${{ inputs.platform }}" \
+            --arch "${{ inputs.arch }}"
+
+      - name: Upload prebuilt artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dimcode-electron-${{ inputs.platform }}-${{ inputs.arch }}
+          path: prebuilt-output
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

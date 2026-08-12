@@ -96,6 +96,9 @@ jobs:
                 linux-x64)
                   matrix='{"include":[{"runner":"ubuntu-24.04","platform":"linux","manifest_platform":"linux","arch":"x64","prime_minutes":225}]}'
                   ;;
+                all)
+                  matrix='{"include":[{"runner":"ubuntu-24.04","platform":"linux","manifest_platform":"linux","arch":"x64","prime_minutes":225}]}'
+                  ;;
                 *)
                   echo "standard-resume requires one supported target, got: ${TARGET}" >&2
                   exit 1
@@ -143,7 +146,7 @@ jobs:
 
   prime:
     name: Prime cache ${{ matrix.platform }} ${{ matrix.arch }} segment ${{ matrix.segment }}
-    if: github.event_name != 'push' && inputs.runner_profile == 'standard-resume'
+    if: github.event_name != 'push' && inputs.runner_profile == 'standard-resume' && inputs.target != 'all'
     needs: configure
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
@@ -247,7 +250,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }}
-    if: always() && needs.configure.result == 'success' && (needs.prime.result == 'success' || needs.prime.result == 'skipped')
+    if: always() && needs.configure.result == 'success' && (inputs.runner_profile != 'standard-resume' || inputs.target != 'all') && (needs.prime.result == 'success' || needs.prime.result == 'skipped')
     needs:
       - configure
       - prime
@@ -404,6 +407,101 @@ jobs:
           path: prebuilt-output
           if-no-files-found: error
           retention-days: 14
+          compression-level: 0
+
+  resume-linux-x64:
+    name: Resume linux x64
+    if: inputs.runner_profile == 'standard-resume' && inputs.target == 'all'
+    needs: configure
+    uses: ./.github/workflows/dimcode-prebuilt-target.yml
+    with:
+      runner: ubuntu-24.04
+      platform: linux
+      manifest_platform: linux
+      arch: x64
+      resume: true
+      prime_minutes: 225
+      cache_epoch: 8d918e182302681bf1e00d8f4b4c694467a89cf8
+    permissions:
+      contents: read
+
+  resume-win32-x64:
+    name: Resume win32 x64
+    needs: resume-linux-x64
+    uses: ./.github/workflows/dimcode-prebuilt-target.yml
+    with:
+      runner: windows-2022
+      platform: win32
+      manifest_platform: win
+      arch: x64
+      resume: true
+      prime_minutes: 155
+      cache_epoch: 8d918e182302681bf1e00d8f4b4c694467a89cf8
+    permissions:
+      contents: read
+
+  resume-darwin-arm64:
+    name: Resume darwin arm64
+    needs: resume-win32-x64
+    uses: ./.github/workflows/dimcode-prebuilt-target.yml
+    with:
+      runner: macos-15
+      platform: darwin
+      manifest_platform: mac
+      arch: arm64
+      resume: true
+      prime_minutes: 205
+      cache_epoch: 8d918e182302681bf1e00d8f4b4c694467a89cf8
+    permissions:
+      contents: read
+
+  resume-darwin-x64:
+    name: Resume darwin x64
+    needs: resume-darwin-arm64
+    uses: ./.github/workflows/dimcode-prebuilt-target.yml
+    with:
+      runner: macos-15-intel
+      platform: darwin
+      manifest_platform: mac
+      arch: x64
+      resume: true
+      prime_minutes: 250
+      cache_epoch: 8d918e182302681bf1e00d8f4b4c694467a89cf8
+    permissions:
+      contents: read
+
+  assemble-resumed:
+    name: Assemble resumed prebuilt bundle
+    if: inputs.runner_profile == 'standard-resume' && inputs.target == 'all'
+    needs: resume-darwin-x64
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out release helper
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      - name: Download platform artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: dimcode-electron-*
+          path: release-input
+          merge-multiple: false
+
+      - name: Aggregate and verify release bundle
+        shell: bash
+        run: |
+          node script/dimcode/prebuilt-release.mjs aggregate \
+            --input-dir release-input \
+            --output-dir release-output
+
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dimcode-electron-prebuilt-bundle
+          path: release-output
+          if-no-files-found: error
+          retention-days: 30
           compression-level: 0
 
   assemble:
