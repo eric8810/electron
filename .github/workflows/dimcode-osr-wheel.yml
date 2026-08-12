@@ -62,13 +62,15 @@ jobs:
           sudo rm -rf /opt/ghc
           df -h
 
-      - name: Configure Windows checkout
-        if: runner.os == 'Windows'
+      - name: Configure build-tools Git settings
         shell: bash
         run: |
           git config --global core.autocrlf false
           git config --global core.filemode false
+          git config --global branch.autosetuprebase always
+          git config --global core.fscache true
           git config --global core.longpaths true
+          git config --global core.preloadindex true
 
       - name: Set up Node.js
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
