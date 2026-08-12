@@ -162,13 +162,11 @@ jobs:
         if: always()
         shell: bash
         run: |
-          stats="$(sccache --show-stats --stats-format json)"
-          jq . <<< "${stats}"
-          hits="$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")"
-          misses="$(jq '[.stats.cache_misses.counts[]] | add // 0' <<< "${stats}")"
-          errors="$(jq '([.stats.cache_errors.counts[]] | add // 0) + .stats.cache_timeouts + .stats.cache_read_errors + .stats.cache_write_errors' <<< "${stats}")"
-          (( hits + misses >= 100 ))
-          (( errors == 0 ))
+          stats_file="${RUNNER_TEMP}/dimcode-sccache-stats.json"
+          sccache --show-stats --stats-format json > "${stats_file}"
+          jq . "${stats_file}"
+          node "${GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/prebuilt-release.mjs" \
+            cache-stats --mode primer --input-file "${stats_file}"
 
   build:
     name: Build and validate
@@ -282,12 +280,11 @@ jobs:
         if: inputs.resume
         shell: bash
         run: |
-          stats="$(sccache --show-stats --stats-format json)"
-          jq . <<< "${stats}"
-          hits="$(jq '[.stats.cache_hits.counts[]] | add // 0' <<< "${stats}")"
-          errors="$(jq '([.stats.cache_errors.counts[]] | add // 0) + .stats.cache_timeouts + .stats.cache_read_errors + .stats.cache_write_errors' <<< "${stats}")"
-          (( hits >= 100 ))
-          (( errors == 0 ))
+          stats_file="${RUNNER_TEMP}/dimcode-sccache-stats.json"
+          sccache --show-stats --stats-format json > "${stats_file}"
+          jq . "${stats_file}"
+          node "${GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/prebuilt-release.mjs" \
+            cache-stats --mode resumed --input-file "${stats_file}"
 
       - name: Prepare Windows Node import library
         if: runner.os == 'Windows'

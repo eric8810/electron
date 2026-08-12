@@ -48,6 +48,99 @@ const requireSuccess = (result) => {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 };
 
+const createCacheStats = (overrides = {}) => ({
+  version: '0.16.0',
+  stats: {
+    cache_hits: { counts: { 'C/C++': 11659 }, adv_counts: {} },
+    cache_misses: { counts: { 'C/C++': 7063 }, adv_counts: {} },
+    cache_errors: { counts: {}, adv_counts: {} },
+    cache_timeouts: 0,
+    cache_read_errors: 0,
+    cache_write_errors: 274,
+    cache_writes: 6789,
+    compile_fails: 0,
+    ...overrides
+  }
+});
+
+test('validates bounded sccache primer and resumed-cache contracts', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-cache-stats-'));
+  try {
+    const runStats = (name, mode, report) => {
+      const inputFile = join(root, `${name}.json`);
+      writeFileSync(inputFile, `${JSON.stringify(report)}\n`);
+      return runHelper(['cache-stats', '--mode', mode, '--input-file', inputFile]);
+    };
+
+    requireSuccess(runStats('linux-observation-primer', 'primer', createCacheStats()));
+    requireSuccess(runStats('linux-observation-resumed', 'resumed', createCacheStats()));
+    requireSuccess(
+      runStats(
+        'exact-write-limit',
+        'primer',
+        createCacheStats({
+          cache_hits: { counts: {}, adv_counts: {} },
+          cache_misses: { counts: { 'C/C++': 200 }, adv_counts: {} },
+          cache_write_errors: 10,
+          cache_writes: 190
+        })
+      )
+    );
+
+    const excessiveWrites = runStats(
+      'excessive-write-errors',
+      'primer',
+      createCacheStats({
+        cache_hits: { counts: {}, adv_counts: {} },
+        cache_misses: { counts: { 'C/C++': 200 }, adv_counts: {} },
+        cache_write_errors: 11,
+        cache_writes: 189
+      })
+    );
+    assert.notEqual(excessiveWrites.status, 0);
+    assert.match(excessiveWrites.stderr, /write failures exceed 5%/);
+
+    const unaccountedMiss = runStats(
+      'unaccounted-miss',
+      'primer',
+      createCacheStats({
+        cache_hits: { counts: {}, adv_counts: {} },
+        cache_misses: { counts: { 'C/C++': 200 }, adv_counts: {} },
+        cache_write_errors: 10,
+        cache_writes: 189
+      })
+    );
+    assert.notEqual(unaccountedMiss.status, 0);
+    assert.match(unaccountedMiss.stderr, /writes do not account for misses/);
+
+    for (const [name, overrides] of [
+      ['cache-error', { cache_errors: { counts: { 'C/C++': 1 }, adv_counts: {} } }],
+      ['timeout', { cache_timeouts: 1 }],
+      ['read-error', { cache_read_errors: 1 }],
+      ['compile-failure', { compile_fails: 1 }]
+    ]) {
+      const result = runStats(name, 'primer', createCacheStats(overrides));
+      assert.notEqual(result.status, 0, name);
+      assert.match(result.stderr, /cache correctness failure/, name);
+    }
+
+    const insufficientFreshHits = runStats(
+      'insufficient-fresh-hits',
+      'resumed',
+      createCacheStats({
+        cache_hits: { counts: { 'C/C++': 99 }, adv_counts: {} },
+        cache_misses: { counts: { 'C/C++': 101 }, adv_counts: {} },
+        cache_write_errors: 0,
+        cache_writes: 101
+      })
+    );
+    assert.notEqual(insufficientFreshHits.status, 0);
+    assert.match(insufficientFreshHits.stderr, /did not resume on a fresh runner/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('prepares, aggregates, verifies and rejects a tampered prebuilt bundle', () => {
   const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-release-'));
   try {

@@ -67,8 +67,8 @@ const assertExactKeys = (value, expectedKeys, name) => {
 
 const parseOptions = (args) => {
   const command = args.shift();
-  if (!['prepare', 'aggregate', 'verify'].includes(command)) {
-    fail('usage: prebuilt-release.mjs <prepare|aggregate|verify> --input value');
+  if (!['prepare', 'aggregate', 'verify', 'cache-stats'].includes(command)) {
+    fail('usage: prebuilt-release.mjs <prepare|aggregate|verify|cache-stats> --input value');
   }
   const options = new Map();
   while (args.length > 0) {
@@ -123,6 +123,82 @@ const readJson = (filePath) => {
   } catch (error) {
     fail(`cannot parse ${filePath}: ${error.message}`);
   }
+};
+
+const requireNonNegativeSafeInteger = (value, name) => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    fail(`${name} must be a non-negative safe integer`);
+  }
+  return value;
+};
+
+const sumCacheCounts = (value, name) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${name} must be an object`);
+  }
+  const counts = value.counts;
+  if (counts === null || typeof counts !== 'object' || Array.isArray(counts)) {
+    fail(`${name}.counts must be an object`);
+  }
+  return Object.entries(counts).reduce(
+    (total, [key, count]) => total + requireNonNegativeSafeInteger(count, `${name}.counts.${key}`),
+    0
+  );
+};
+
+const validateCacheStats = (options) => {
+  const inputFile = resolvePath(getOption(options, 'input-file'));
+  const mode = getOption(options, 'mode');
+  if (!['primer', 'resumed'].includes(mode)) {
+    fail(`--mode must be primer or resumed, got ${mode}`);
+  }
+  const report = readJson(inputFile);
+  if (report.version !== '0.16.0') {
+    fail(`sccache version must be 0.16.0, got ${report.version ?? '<missing>'}`);
+  }
+  if (report.stats === null || typeof report.stats !== 'object' || Array.isArray(report.stats)) {
+    fail('sccache stats must be an object');
+  }
+
+  const stats = report.stats;
+  const hits = sumCacheCounts(stats.cache_hits, 'stats.cache_hits');
+  const misses = sumCacheCounts(stats.cache_misses, 'stats.cache_misses');
+  const cacheErrors = sumCacheCounts(stats.cache_errors, 'stats.cache_errors');
+  const cacheTimeouts = requireNonNegativeSafeInteger(stats.cache_timeouts, 'stats.cache_timeouts');
+  const cacheReadErrors = requireNonNegativeSafeInteger(stats.cache_read_errors, 'stats.cache_read_errors');
+  const cacheWriteErrors = requireNonNegativeSafeInteger(stats.cache_write_errors, 'stats.cache_write_errors');
+  const cacheWrites = requireNonNegativeSafeInteger(stats.cache_writes, 'stats.cache_writes');
+  const compileFails = requireNonNegativeSafeInteger(stats.compile_fails, 'stats.compile_fails');
+
+  if (hits + misses < 100) {
+    fail(`compiler cache activity is too small: ${hits} hits + ${misses} misses`);
+  }
+  if (cacheErrors !== 0 || cacheTimeouts !== 0 || cacheReadErrors !== 0 || compileFails !== 0) {
+    fail(
+      `compiler cache correctness failure: ${cacheErrors} cache errors, ${cacheTimeouts} timeouts, ` +
+        `${cacheReadErrors} read errors, ${compileFails} compile failures`
+    );
+  }
+  if (cacheWrites + cacheWriteErrors !== misses) {
+    fail(
+      `compiler cache writes do not account for misses: ${cacheWrites} writes + ` +
+        `${cacheWriteErrors} write errors != ${misses} misses`
+    );
+  }
+  if (BigInt(cacheWriteErrors) * 100n > BigInt(misses) * 5n) {
+    fail(`compiler cache write failures exceed 5%: ${cacheWriteErrors} of ${misses} misses`);
+  }
+  if (mode === 'primer' && hits < 100 && cacheWrites < 100) {
+    fail(`compiler cache primer is not populated: ${hits} hits, ${cacheWrites} writes`);
+  }
+  if (mode === 'resumed' && hits < 100) {
+    fail(`compiler cache did not resume on a fresh runner: ${hits} hits`);
+  }
+
+  console.log(
+    `[dimcode-prebuilt] cache ${mode}: ${hits} hits, ${misses} misses, ${cacheWrites} writes, ` +
+      `${cacheWriteErrors} write errors`
+  );
 };
 
 const writeJson = (filePath, value) => {
@@ -600,6 +676,8 @@ if (command === 'prepare') {
   await prepare(options);
 } else if (command === 'aggregate') {
   await aggregate(options);
+} else if (command === 'cache-stats') {
+  validateCacheStats(options);
 } else {
   await verifyDirectory(resolvePath(getOption(options, 'input-dir')));
 }
