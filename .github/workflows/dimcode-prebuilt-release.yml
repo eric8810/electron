@@ -219,6 +219,11 @@ jobs:
           git config --global core.longpaths true
           git config --global core.preloadindex true
 
+      - name: Assert Windows VS 2022 toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "${env:GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/assert-windows-toolchain.ps1"'
+
       - name: Set up Node.js
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
         with:
@@ -324,6 +329,11 @@ jobs:
           git config --global core.fscache true
           git config --global core.longpaths true
           git config --global core.preloadindex true
+
+      - name: Assert Windows VS 2022 toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& "${env:GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/assert-windows-toolchain.ps1"'
 
       - name: Set up Node.js
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
