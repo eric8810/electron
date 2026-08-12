@@ -52,6 +52,7 @@ env:
   EVM_CONFIG: ${{ github.workspace }}/.electron-build-tools-config
   EVM_CURRENT_FILE: ${{ github.workspace }}/.electron-build-tools-current
   GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
+  SCCACHE_SOURCE_EPOCH: 8d918e182302681bf1e00d8f4b4c694467a89cf8
 
 jobs:
   configure:
@@ -60,6 +61,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      prime_matrix: ${{ steps.matrix.outputs.prime_matrix }}
     env:
       RUNNER_PROFILE: ${{ github.event_name == 'push' && 'release' || inputs.runner_profile }}
       TARGET: ${{ github.event_name == 'push' && 'all' || inputs.target }}
@@ -133,20 +135,27 @@ jobs:
               ;;
           esac
           echo "matrix=${matrix}" >> "${GITHUB_OUTPUT}"
+          if [[ "${RUNNER_PROFILE}" == standard-resume ]]; then
+            prime_matrix="$(jq -c '{include:[.include[0] + {segment:1}, .include[0] + {segment:2}]}' <<< "${matrix}")"
+          else
+            prime_matrix="${matrix}"
+          fi
+          echo "prime_matrix=${prime_matrix}" >> "${GITHUB_OUTPUT}"
 
   prime:
-    name: Prime cache ${{ matrix.platform }} ${{ matrix.arch }}
+    name: Prime cache ${{ matrix.platform }} ${{ matrix.arch }} segment ${{ matrix.segment }}
     if: github.event_name != 'push' && inputs.runner_profile == 'standard-resume'
     needs: configure
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.configure.outputs.prime_matrix) }}
     env:
       GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"'
       SCCACHE_GHA_ENABLED: 'on'
-      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.SCCACHE_SOURCE_EPOCH }}
 
     steps:
       - name: Check out patched Electron
@@ -200,7 +209,7 @@ jobs:
       - name: Initialize release cache primer
         shell: bash
         run: |
-          e init dimcode-prime-${{ matrix.platform }}-${{ matrix.arch }} \
+          e init dimcode-prime-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.segment }} \
             --root="${GITHUB_WORKSPACE}/electron-root" \
             --import=release \
             --out=Release \
@@ -251,7 +260,7 @@ jobs:
     env:
       GN_EXTRA_ARGS: ${{ inputs.runner_profile == 'standard-resume' && 'symbol_level=0 override_electron_version="41.7.1" cc_wrapper="sccache"' || 'symbol_level=0 override_electron_version="41.7.1"' }}
       SCCACHE_GHA_ENABLED: ${{ inputs.runner_profile == 'standard-resume' && 'on' || 'off' }}
-      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+      SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.SCCACHE_SOURCE_EPOCH }}
 
     steps:
       - name: Check out patched Electron
