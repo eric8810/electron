@@ -140,4 +140,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'prebuilt'
     uses: ./.github/workflows/dimcode-prebuilt-release.yml
     permissions:
-      contents: read
+      contents: write
+      id-token: write
+      attestations: write
