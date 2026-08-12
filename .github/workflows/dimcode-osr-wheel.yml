@@ -20,7 +20,7 @@ env:
   ELECTRON_OUT_DIR: Testing
   EVM_CONFIG: ${{ github.workspace }}/.electron-build-tools-config
   EVM_CURRENT_FILE: ${{ github.workspace }}/.electron-build-tools-current
-  GN_EXTRA_ARGS: symbol_level=0
+  GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
 
 jobs:
   build-and-test:
@@ -38,7 +38,7 @@ jobs:
             runner: ubuntu-24.04
             target-cpu: x64
           - name: Windows x64
-            runner: windows-2025
+            runner: windows-2022
             target-cpu: x64
 
     steps:
@@ -95,6 +95,7 @@ jobs:
             --force
           e sync --no-history
           test "$(git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" rev-parse HEAD)" = "${GITHUB_SHA}"
+          git -C "${GITHUB_WORKSPACE}/electron-root/src/electron" pack-refs --all
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
