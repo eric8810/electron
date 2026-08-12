@@ -73,6 +73,12 @@ jobs:
         id: matrix
         shell: bash
         run: |
+          if [[ "${GITHUB_EVENT_NAME}" == push ]]; then
+            if [[ "${GITHUB_REF_TYPE}" != tag || ! "${GITHUB_REF_NAME}" =~ ^dimcode-v41\.7\.1-r[1-9][0-9]*$ ]]; then
+              echo "release tag is invalid: ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+          fi
           case "${RUNNER_PROFILE}" in
             standard-probe)
               matrix="$(jq -cn '{include:[
