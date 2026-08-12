@@ -237,7 +237,7 @@ jobs:
 
       - name: Install pinned Electron build tools
         shell: bash
-        run: npm install --global @electron/build-tools
+        run: npm install --global @electron/build-tools@2.1.5
 
       - name: Install pinned sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
@@ -348,7 +348,7 @@ jobs:
 
       - name: Install pinned Electron build tools
         shell: bash
-        run: npm install --global @electron/build-tools
+        run: npm install --global @electron/build-tools@2.1.5
 
       - name: Install pinned sccache
         if: inputs.runner_profile == 'standard-resume'

@@ -106,11 +106,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f
         with:
-          node-version: 22.21.x
+          node-version: 22.21.1
 
       - name: Install pinned Electron build tools
         shell: bash
-        run: npm install --global @electron/build-tools
+        run: npm install --global @electron/build-tools@2.1.5
 
       - name: Initialize Electron build
         shell: bash
