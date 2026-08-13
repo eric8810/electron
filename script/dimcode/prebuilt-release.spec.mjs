@@ -141,6 +141,24 @@ test('validates bounded sccache primer and resumed-cache contracts', () => {
   }
 });
 
+test('settles asynchronous primer cache writes before enforcing exact accounting', () => {
+  for (const workflowPath of [
+    '.github/workflows/dimcode-prebuilt-release.yml',
+    '.github/workflows/dimcode-prebuilt-target.yml'
+  ]) {
+    const workflow = readFileSync(join(repository, workflowPath), 'utf8');
+    const gateStart = workflow.indexOf('      - name: Require populated compiler cache');
+    assert.notEqual(gateStart, -1, workflowPath);
+    const gateEnd = workflow.indexOf('\n  build:', gateStart);
+    assert.notEqual(gateEnd, -1, workflowPath);
+    const gate = workflow.slice(gateStart, gateEnd);
+    assert.match(gate, /for cache_stats_attempt in 1 2 3 4 5;/, workflowPath);
+    assert.match(gate, /cache-stats --mode primer --input-file/, workflowPath);
+    assert.match(gate, /if \[\[ "\$\{cache_stats_attempt\}" == 5 \]\]; then\n\s+exit 1/, workflowPath);
+    assert.match(gate, /sleep 2/, workflowPath);
+  }
+});
+
 test('prepares, aggregates, verifies and rejects a tampered prebuilt bundle', () => {
   const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-release-'));
   try {

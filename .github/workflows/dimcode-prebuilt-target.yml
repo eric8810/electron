@@ -168,10 +168,18 @@ jobs:
         shell: bash
         run: |
           stats_file="${RUNNER_TEMP}/dimcode-sccache-stats.json"
-          sccache --show-stats --stats-format json > "${stats_file}"
-          jq . "${stats_file}"
-          node "${GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/prebuilt-release.mjs" \
-            cache-stats --mode primer --input-file "${stats_file}"
+          for cache_stats_attempt in 1 2 3 4 5; do
+            sccache --show-stats --stats-format json > "${stats_file}"
+            jq . "${stats_file}"
+            if node "${GITHUB_WORKSPACE}/electron-root/src/electron/script/dimcode/prebuilt-release.mjs" \
+              cache-stats --mode primer --input-file "${stats_file}"; then
+              exit 0
+            fi
+            if [[ "${cache_stats_attempt}" == 5 ]]; then
+              exit 1
+            fi
+            sleep 2
+          done
 
   build:
     name: Build and validate
