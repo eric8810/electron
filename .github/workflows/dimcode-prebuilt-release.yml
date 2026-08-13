@@ -187,6 +187,7 @@ jobs:
       matrix: ${{ fromJSON(needs.configure.outputs.prime_matrix) }}
     env:
       GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
+      NODE_GYP_FORCE_PYTHON: ${{ matrix.platform == 'linux' && '/usr/bin/python3' || '' }}
       SCCACHE_GHA_ENABLED: 'on'
       SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-8d918e182302681bf1e00d8f4b4c694467a89cf8
 
@@ -256,6 +257,10 @@ jobs:
       - name: Initialize release cache primer
         shell: bash
         run: |
+          if [[ "${RUNNER_OS}" == Linux ]]; then
+            test "${NODE_GYP_FORCE_PYTHON}" = /usr/bin/python3
+            "${NODE_GYP_FORCE_PYTHON}" -c 'import encodings, sys; print(sys.executable)'
+          fi
           e init dimcode-prime-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.segment }} \
             --root="${GITHUB_WORKSPACE}/electron-root" \
             --import=release \
@@ -305,6 +310,7 @@ jobs:
       matrix: ${{ fromJSON(needs.configure.outputs.matrix) }}
     env:
       GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
+      NODE_GYP_FORCE_PYTHON: ${{ matrix.platform == 'linux' && '/usr/bin/python3' || '' }}
       SCCACHE_GHA_ENABLED: ${{ inputs.runner_profile == 'standard-resume' && 'on' || 'off' }}
       SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ matrix.platform }}-${{ matrix.arch }}-8d918e182302681bf1e00d8f4b4c694467a89cf8
 
@@ -376,6 +382,10 @@ jobs:
       - name: Initialize release build
         shell: bash
         run: |
+          if [[ "${RUNNER_OS}" == Linux ]]; then
+            test "${NODE_GYP_FORCE_PYTHON}" = /usr/bin/python3
+            "${NODE_GYP_FORCE_PYTHON}" -c 'import encodings, sys; print(sys.executable)'
+          fi
           e init dimcode-prebuilt-${{ matrix.platform }}-${{ matrix.arch }} \
             --root="${GITHUB_WORKSPACE}/electron-root" \
             --import=release \

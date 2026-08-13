@@ -59,6 +59,7 @@ jobs:
           - 2
     env:
       GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
+      NODE_GYP_FORCE_PYTHON: ${{ inputs.platform == 'linux' && '/usr/bin/python3' || '' }}
       SCCACHE_GHA_ENABLED: 'on'
       SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.cache_epoch }}
 
@@ -133,6 +134,10 @@ jobs:
       - name: Initialize release cache primer
         shell: bash
         run: |
+          if [[ "${RUNNER_OS}" == Linux ]]; then
+            test "${NODE_GYP_FORCE_PYTHON}" = /usr/bin/python3
+            "${NODE_GYP_FORCE_PYTHON}" -c 'import encodings, sys; print(sys.executable)'
+          fi
           e init dimcode-prime-${{ inputs.platform }}-${{ inputs.arch }}-${{ matrix.segment }} \
             --root="${GITHUB_WORKSPACE}/electron-root" \
             --import=release \
@@ -176,6 +181,7 @@ jobs:
     timeout-minutes: 360
     env:
       GN_EXTRA_ARGS: 'symbol_level=0 override_electron_version="41.7.1"'
+      NODE_GYP_FORCE_PYTHON: ${{ inputs.platform == 'linux' && '/usr/bin/python3' || '' }}
       SCCACHE_GHA_ENABLED: ${{ inputs.resume && 'on' || 'off' }}
       SCCACHE_GHA_VERSION: dimcode-electron-v41.7.1-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.cache_epoch }}
 
@@ -252,6 +258,10 @@ jobs:
       - name: Initialize release build
         shell: bash
         run: |
+          if [[ "${RUNNER_OS}" == Linux ]]; then
+            test "${NODE_GYP_FORCE_PYTHON}" = /usr/bin/python3
+            "${NODE_GYP_FORCE_PYTHON}" -c 'import encodings, sys; print(sys.executable)'
+          fi
           e init dimcode-prebuilt-${{ inputs.platform }}-${{ inputs.arch }} \
             --root="${GITHUB_WORKSPACE}/electron-root" \
             --import=release \
