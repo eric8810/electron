@@ -444,12 +444,12 @@ jobs:
             "${build_dir}/dist.zip" \
             "${GITHUB_WORKSPACE}/electron-root/src/electron/script/zip_manifests/dist_zip.${{ matrix.manifest_platform }}.${{ matrix.arch }}.manifest"
           case "${{ matrix.platform }}" in
-            darwin) runtime="${build_dir}/Electron.app/Contents/MacOS/Electron" ;;
-            linux) runtime="${build_dir}/electron" ;;
-            win32) runtime="${build_dir}/electron.exe" ;;
+            darwin) runtime="${build_dir}/Electron.app/Contents/MacOS/Electron"; version_args=(--version) ;;
+            linux) runtime="${build_dir}/electron"; version_args=(--no-sandbox --version) ;;
+            win32) runtime="${build_dir}/electron.exe"; version_args=(--version) ;;
             *) echo "unsupported platform: ${{ matrix.platform }}" >&2; exit 1 ;;
           esac
-          test "$("${runtime}" --version)" = "v41.7.1"
+          test "$("${runtime}" "${version_args[@]}")" = "v41.7.1"
           runtime_file="$(file "${runtime}")"
           case "${{ matrix.platform }}-${{ matrix.arch }}" in
             darwin-arm64) [[ "${runtime_file}" == *Mach-O* && "${runtime_file}" == *arm64* ]] ;;

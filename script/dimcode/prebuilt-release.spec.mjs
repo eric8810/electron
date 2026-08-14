@@ -159,6 +159,27 @@ test('settles asynchronous primer cache writes before enforcing exact accounting
   }
 });
 
+test('disables the sandbox only for the Linux runtime version probe', () => {
+  for (const workflowPath of [
+    '.github/workflows/dimcode-prebuilt-release.yml',
+    '.github/workflows/dimcode-prebuilt-target.yml'
+  ]) {
+    const workflow = readFileSync(join(repository, workflowPath), 'utf8');
+    const validationStart = workflow.indexOf('      - name: Validate release runtime');
+    assert.notEqual(validationStart, -1, workflowPath);
+    const validationEnd = workflow.indexOf('\n      - name: Run OSR wheel regression spec', validationStart);
+    assert.notEqual(validationEnd, -1, workflowPath);
+    const validation = workflow.slice(validationStart, validationEnd);
+    assert.match(validation, /darwin\) runtime=.*version_args=\(--version\)/, workflowPath);
+    assert.match(validation, /linux\) runtime=.*version_args=\(--no-sandbox --version\)/, workflowPath);
+    assert.match(validation, /win32\) runtime=.*version_args=\(--version\)/, workflowPath);
+    assert.match(validation, /test "\$\("\$\{runtime\}" "\$\{version_args\[@\]\}"\)" = "v41\.7\.1"/, workflowPath);
+    assert.equal(validation.match(/--no-sandbox/g)?.length, 1, workflowPath);
+    assert.match(validation, /dist_zip\..*\.manifest/, workflowPath);
+    assert.match(validation, /linux-x64\).*ELF\\ 64-bit.*x86-64/, workflowPath);
+  }
+});
+
 test('prepares, aggregates, verifies and rejects a tampered prebuilt bundle', () => {
   const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-release-'));
   try {
