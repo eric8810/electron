@@ -410,7 +410,10 @@ jobs:
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         shell: bash
-        run: sudo "${GITHUB_WORKSPACE}/electron-root/src/build/install-build-deps.sh" --no-prompt
+        run: |
+          sudo "${GITHUB_WORKSPACE}/electron-root/src/build/install-build-deps.sh" --no-prompt
+          sudo apt-get install --no-install-recommends --yes python3-dbusmock
+          python3 -c 'from dbusmock import DBusTestCase'
 
       - name: Build release runtime and Node headers
         shell: bash

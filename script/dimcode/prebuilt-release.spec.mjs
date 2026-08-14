@@ -180,6 +180,25 @@ test('disables the sandbox only for the Linux runtime version probe', () => {
   }
 });
 
+test('installs and verifies the Linux OSR wheel test dependency', () => {
+  for (const workflowPath of [
+    '.github/workflows/dimcode-prebuilt-release.yml',
+    '.github/workflows/dimcode-prebuilt-target.yml'
+  ]) {
+    const workflow = readFileSync(join(repository, workflowPath), 'utf8');
+    const buildStart = workflow.indexOf('      - name: Initialize release build');
+    assert.notEqual(buildStart, -1, workflowPath);
+    const installStart = workflow.indexOf('      - name: Install Linux build dependencies', buildStart);
+    assert.notEqual(installStart, -1, workflowPath);
+    const installEnd = workflow.indexOf('\n      - name: Build release runtime and Node headers', installStart);
+    assert.notEqual(installEnd, -1, workflowPath);
+    const install = workflow.slice(installStart, installEnd);
+    assert.match(install, /if: runner\.os == 'Linux'/, workflowPath);
+    assert.match(install, /apt-get install --no-install-recommends --yes python3-dbusmock/, workflowPath);
+    assert.match(install, /python3 -c 'from dbusmock import DBusTestCase'/, workflowPath);
+  }
+});
+
 test('prepares, aggregates, verifies and rejects a tampered prebuilt bundle', () => {
   const root = mkdtempSync(join(tmpdir(), 'dimcode-prebuilt-release-'));
   try {
